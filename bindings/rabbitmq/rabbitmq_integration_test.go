@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/dapr/components-contrib/bindings"
-	"github.com/dapr/components-contrib/metadata"
+	contrib_metadata "github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/dapr/pkg/logger"
 	"github.com/google/uuid"
 	"github.com/streadway/amqp"
@@ -60,11 +60,11 @@ func TestQueuesWithTTL(t *testing.T) {
 	metadata := bindings.Metadata{
 		Name: "testQueue",
 		Properties: map[string]string{
-			"queueName":             queueName,
-			"host":                  rabbitmqHost,
-			"deleteWhenUnused":      strconv.FormatBool(exclusive),
-			"durable":               strconv.FormatBool(durable),
-			metadata.TTLMetadataKey: strconv.FormatInt(ttlInSeconds, 10),
+			"queueName":                     queueName,
+			"host":                          rabbitmqHost,
+			"deleteWhenUnused":              strconv.FormatBool(exclusive),
+			"durable":                       strconv.FormatBool(durable),
+			contrib_metadata.TTLMetadataKey: strconv.FormatInt(ttlInSeconds, 10),
 		},
 	}
 
@@ -84,7 +84,7 @@ func TestQueuesWithTTL(t *testing.T) {
 	defer ch.Close()
 
 	const tooLateMsgContent = "too_late_msg"
-	err = r.Write(&bindings.InvokeRequest{Data: []byte(tooLateMsgContent)})
+	_, err = r.Invoke(&bindings.InvokeRequest{Data: []byte(tooLateMsgContent)})
 	assert.Nil(t, err)
 
 	time.Sleep(time.Second + (ttlInSeconds * time.Second))
@@ -95,7 +95,7 @@ func TestQueuesWithTTL(t *testing.T) {
 
 	// Getting before it is expired, should return it
 	const testMsgContent = "test_msg"
-	err = r.Write(&bindings.InvokeRequest{Data: []byte(testMsgContent)})
+	_, err = r.Invoke(&bindings.InvokeRequest{Data: []byte(testMsgContent)})
 	assert.Nil(t, err)
 
 	msg, ok, err := getMessageWithRetries(ch, queueName, maxGetDuration)
@@ -144,11 +144,11 @@ func TestPublishingWithTTL(t *testing.T) {
 	writeRequest := bindings.InvokeRequest{
 		Data: []byte(tooLateMsgContent),
 		Metadata: map[string]string{
-			metadata.TTLMetadataKey: strconv.Itoa(ttlInSeconds),
+			contrib_metadata.TTLMetadataKey: strconv.Itoa(ttlInSeconds),
 		},
 	}
 
-	err = rabbitMQBinding1.Write(&writeRequest)
+	_, err = rabbitMQBinding1.Invoke(&writeRequest)
 	assert.Nil(t, err)
 
 	time.Sleep(time.Second + (ttlInSeconds * time.Second))
@@ -166,10 +166,10 @@ func TestPublishingWithTTL(t *testing.T) {
 	writeRequest = bindings.InvokeRequest{
 		Data: []byte(testMsgContent),
 		Metadata: map[string]string{
-			metadata.TTLMetadataKey: strconv.Itoa(ttlInSeconds * 1000),
+			contrib_metadata.TTLMetadataKey: strconv.Itoa(ttlInSeconds * 1000),
 		},
 	}
-	err = rabbitMQBinding2.Write(&writeRequest)
+	_, err = rabbitMQBinding2.Invoke(&writeRequest)
 	assert.Nil(t, err)
 
 	msg, ok, err := getMessageWithRetries(ch, queueName, maxGetDuration)
