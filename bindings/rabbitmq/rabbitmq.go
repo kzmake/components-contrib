@@ -19,17 +19,20 @@ import (
 )
 
 const (
-	host                       = "host"
-	queueName                  = "queueName"
-	exclusive                  = "exclusive"
-	durable                    = "durable"
-	deleteWhenUnused           = "deleteWhenUnused"
-	prefetchCount              = "prefetchCount"
-	maxPriority                = "maxPriority"
+	host             = "host"
+	queueName        = "queueName"
+	exclusive        = "exclusive"
+	durable          = "durable"
+	deleteWhenUnused = "deleteWhenUnused"
+	prefetchCount    = "prefetchCount"
+	maxPriority      = "maxPriority"
+	autoAck          = "autoAck"
+
 	rabbitMQQueueMessageTTLKey = "x-message-ttl"
 	rabbitMQMaxPriorityKey     = "x-max-priority"
-	defaultBase                = 10
-	defaultBitSize             = 0
+
+	defaultBase    = 10
+	defaultBitSize = 0
 )
 
 // RabbitMQ allows sending/receiving data to/from RabbitMQ
@@ -50,6 +53,7 @@ type rabbitMQMetadata struct {
 	DeleteWhenUnused bool   `json:"deleteWhenUnused,string"`
 	PrefetchCount    int    `json:"prefetchCount"`
 	MaxPriority      *uint8 `json:"maxPriority"` // Priority Queue deactivated if nil
+	AutoAck          bool   `json:"autoAck,string"`
 	defaultQueueTTL  *time.Duration
 }
 
@@ -200,6 +204,14 @@ func (r *RabbitMQ) parseMetadata(metadata bindings.Metadata) error {
 		m.defaultQueueTTL = &ttl
 	}
 
+	if val, ok := metadata.Properties[autoAck]; ok && val != "" {
+		autoAck, err := strconv.ParseBool(val)
+		if err != nil {
+			return fmt.Errorf("rabbitMQ binding error: can't parse autoAck field: %s", err)
+		}
+		m.AutoAck = autoAck
+	}
+
 	r.metadata = m
 
 	return nil
@@ -224,7 +236,7 @@ func (r *RabbitMQ) Read(handler func(*bindings.ReadResponse) error) error {
 	msgs, err := r.channel.Consume(
 		r.queue.Name,
 		"",
-		false,
+		r.metadata.AutoAck, // auto Ack
 		false,
 		false,
 		false,
@@ -241,8 +253,20 @@ func (r *RabbitMQ) Read(handler func(*bindings.ReadResponse) error) error {
 			err := handler(&bindings.ReadResponse{
 				Data: d.Body,
 			})
-			if err == nil {
-				r.channel.Ack(d.DeliveryTag, false)
+
+			// if message is not auto acked we need to ack/nack
+			if !r.metadata.AutoAck {
+				if err != nil {
+					r.logger.Debugf("rabbitMQ bindings: nacking message '%s' from queue '%s'", d.MessageId, r.queue.Name)
+					if nerr := r.channel.Nack(d.DeliveryTag, false, false); nerr != nil {
+						r.logger.Errorf("rabbitMQ bindings error: error nacking message '%s' from queue '%s', %s", d.MessageId, r.queue.Name, nerr)
+					}
+				} else {
+					r.logger.Debugf("rabbitMQ bindings: acking message '%s' from queue '%s'", d.MessageId, r.queue.Name)
+					if aerr := r.channel.Ack(d.DeliveryTag, false); aerr != nil {
+						r.logger.Errorf("rabbitMQ bindings error: error nacking message '%s' from queue '%s', %s", d.MessageId, r.queue.Name, aerr)
+					}
+				}
 			}
 		}
 	}()
